@@ -1,22 +1,47 @@
 # omarchy-theme-studio
 
-A terminal UI for creating, editing, and applying [Zellij](https://zellij.dev) themes. Live preview of your changes across all UI components — tab bar, panes, status bar, tables, lists — before writing anything to disk.
-
-![omarchy-theme-studio screenshot](screen.png)
+A terminal UI for designing [Omarchy](https://omarchy.org) desktop themes. Edit a flat color
+palette with a live mock-desktop preview — Waybar, Hyprland windows, the launcher, a terminal
+sample, and a notification popup — then export a real, ready-to-apply Omarchy theme directory.
 
 ## Features
 
-- **Live preview** — see every color change reflected instantly across a full Zellij-layout mockup
-- **41 built-in themes** — all official Zellij themes bundled, no extra files needed
-- **Per-component theming** — control foreground and background for each UI element independently
+- **Mock desktop preview** — see every color reflected instantly across a faux Hyprland desktop
+- **Flat palette model** — 17 named colors (background, foreground, accent, borders, Waybar,
+  launcher, terminal, notification) edited one at a time
 - **Dual-mode color picker** — RGB sliders plus an HSL field picker with live HEX/RGB/HSL values
 - **Yank / paste / undo** — copy a color, paste it elsewhere, or undo the last change (`y` / `p` / `u`)
-- **Theme loader** — fuzzy search, filter by built-in or saved, live preview on scroll
-- **Rename / delete** — manage saved themes directly from the loader (`r` / `x`)
-- **Save themes** — writes to `~/.config/zellij/themes/` in the correct KDL format
-- **Apply to Zellij** — sets `theme "<name>"` in `~/.config/zellij/config.kdl` so Zellij picks it up on next launch
-- **In-app self-update** — checks GitHub releases on startup and can replace the binary in place on Linux x86_64 (`U` when an update is available)
+- **Theme loader** — fuzzy search and filter across built-in presets and your saved themes, with live preview
+- **Omarchy-native export** — writes the real flat files Omarchy consumes (see below)
+- **Gated apply** — if `omarchy-theme-set` is on your PATH, press `a` to apply, but only after
+  an explicit confirmation. Nothing is ever applied automatically, and existing config is never edited.
+- **In-app self-update** — checks GitHub releases and can replace the binary in place on Linux x86_64 (`U`)
 - **Help overlay** — press `?` for a full keybinding reference
+
+## What it exports
+
+Saving a theme writes `~/.config/omarchy/themes/<name>/` containing:
+
+| File | Purpose |
+| --- | --- |
+| `colors.toml` | Canonical Omarchy palette — `omarchy-theme-set` reads this to drive every app |
+| `hyprland.conf` | `col.active_border` / `col.inactive_border` (Hyprland `rgb()` form) |
+| `hyprlock.conf` | Lock screen colors (`source`d by `~/.config/hypr/hyprlock.conf`) |
+| `waybar.css` | Waybar background, foreground, active workspace |
+| `walker.css` | Launcher (walker) colors |
+| `ghostty.conf` | Terminal background / foreground / cursor / selection |
+| `README.md` | A palette reference for the theme |
+| `palette.json` | Round-trip source so the studio can reload the theme for editing |
+
+To apply a theme, copy its directory into `~/.config/omarchy/themes/` (the studio already writes
+there) and run `omarchy-theme-set <name>` — or press `a` in the studio.
+
+Theme files are plain `@define-color` / `key = value` sets — the selectors live in walker's and
+Waybar's own layout, which reference fixed color names. A couple of palette fields therefore drive
+the live preview but don't have a dedicated slot in Omarchy's current file formats:
+the **launcher selected foreground** (walker exposes a single `selected-text` highlight, fed from
+*launcher selected background*) and the **Waybar active workspace** (Omarchy colors that from
+`colors.toml`'s `accent`). Everything else maps directly.
 
 ## Installation
 
@@ -55,21 +80,23 @@ cp target/release/omarchy-theme-studio ~/.local/bin/
 omarchy-theme-studio
 ```
 
-The app opens a full-terminal preview of a Zellij layout. Use the keyboard to navigate and edit.
+The app opens a full-terminal mock desktop. Navigate the palette fields and edit their colors.
 
 ### Keybindings
 
 | Key | Action |
 |-----|--------|
-| `↑ ↓ ← →` / `j k` | Navigate between preview elements |
-| `Tab` | Toggle FG / BG (not available on pane borders) |
-| `c` / `Enter` | Open color picker for the selected color |
+| `1`–`6` | Jump to a palette group (Desktop, Windows, Waybar, Launcher, Terminal, Notification) |
+| `←` `→` / `Tab` `⇧Tab` | Previous / next group |
+| `↑/k` `↓/j` | Move between fields within the current group |
+| `/` | Find a field by fuzzy search (type, `↑↓`, `Enter`) |
+| `c` / `Enter` | Open color picker for the selected field |
 | `y` | Yank (copy) current color |
 | `p` | Paste yanked color |
 | `u` | Undo last color change |
-| `s` | Save theme as… (prompts for a name) |
+| `s` | Export theme to `~/.config/omarchy/themes/` |
 | `l` | Open theme loader |
-| `a` | Apply current theme to Zellij |
+| `a` | Apply via `omarchy-theme-set` (asks for confirmation; only if installed) |
 | `U` | Install the latest released binary when an update is available on Linux x86_64 |
 | `?` | Toggle help overlay |
 | `q` / `Esc` | Quit |
@@ -80,11 +107,10 @@ The app opens a full-terminal preview of a Zellij layout. Use the keyboard to na
 |-----|--------|
 | `Tab` / `Shift + Tab` | Move focus between picker controls |
 | `m` | Switch RGB sliders / HSL field |
-| `f` | Toggle FG / BG (non-pane elements only) |
 | `↑ ↓ ← →` | Nudge the focused control |
 | `Shift` / `Alt` with arrows | Coarse / fine nudging |
 | `#` | Jump straight to hex editing |
-| `Enter` | Edit the focused value field or confirm |
+| `Enter` | Edit the focused value field or keep |
 | `Esc` | Cancel |
 | `mouse drag` | Drag in the HSL field or lightness slider |
 
@@ -92,56 +118,55 @@ The app opens a full-terminal preview of a Zellij layout. Use the keyboard to na
 
 | Key | Action |
 |-----|--------|
-| `type` | Search — fuzzy filter by name; `Enter` or `↓` to commit and navigate results |
+| `type` | Search — fuzzy filter by name |
 | `↑ ↓` | Navigate themes |
-| `Enter` | Load selected theme into editor |
-| `a` | Apply selected theme directly to Zellij |
-| `d` | Filter: built-in themes only |
+| `Enter` | Load selected theme into the editor |
+| `d` | Filter: built-in presets only |
 | `s` | Filter: saved themes only |
 | `r` | Rename selected saved theme |
 | `x` | Delete selected saved theme |
 | `Esc` | Clear search / cancel |
 
-## Built-in themes
+## Palette fields
 
-All 41 official Zellij themes are bundled in the binary and available immediately from the theme loader (`l`):
+| Group | Fields |
+|-------|--------|
+| Desktop | background, foreground, accent, accent 2 |
+| Windows | active border, inactive border |
+| Waybar | background, foreground, active workspace |
+| Launcher | background, foreground, selected background, selected foreground |
+| Terminal | background, foreground |
+| Notification | background, border |
 
-ansi · ao · atelier · ayu-dark · ayu-light · ayu-mirage · blade-runner · catppuccin-frappe · catppuccin-latte · catppuccin-macchiato · catppuccin-mocha · cyber-noir · dayfox · dracula · everforest-dark · everforest-light · flexoki-dark · gruber-darker · gruvbox-dark · gruvbox-light · iceberg-dark · iceberg-light · kanagawa · lucario · menace · molokai-dark · night-owl · nightfox · nord · one-half-dark · onedark · pencil-light · retro-wave · solarized-dark · solarized-light · terafox · tokyo-night · tokyo-night-dark · tokyo-night-light · tokyo-night-storm · vesper
+## Applying to a VM (develop on the host, see it on the guest)
 
-## Theme format
+Run the studio on your fast host and have `a` apply on an Omarchy VM over SSH. Set
+`OTS_APPLY_CMD` to the bundled wrapper, which rsyncs the exported theme to the VM and runs
+`omarchy-theme-set` there:
 
-Themes are saved to `~/.config/zellij/themes/<name>.kdl`:
-
-```kdl
-themes {
-    my-theme {
-        ribbon_selected {
-            base 30 30 46
-            background 137 180 250
-            emphasis_0 255 255 255
-            emphasis_1 200 200 200
-            emphasis_2 150 150 150
-            emphasis_3 100 100 100
-        }
-        // text_unselected, ribbon_unselected, frame_selected, … etc.
-    }
-}
+```sh
+export OTS_VM=user@192.168.122.50            # the VM, over SSH (key auth!)
+export OTS_APPLY_CMD="$PWD/scripts/apply-to-vm.sh"
+omarchy-theme-studio                          # press a → confirm → it lands on the VM
 ```
 
-Standard Zellij palette themes (using `fg`, `bg`, `black`, `red`, … keys) are also supported — the loader maps palette colors to components automatically.
+`OTS_APPLY_CMD` overrides the local `omarchy-theme-set` with any `<cmd> <name>` command, so
+the studio works the same whether it's applying locally or to a remote machine. SSH must be
+**non-interactive** (key auth / ssh-agent) — the wrapper uses `BatchMode` so a missing key
+fails fast instead of hanging the TUI. You can also run the wrapper by hand:
+`scripts/apply-to-vm.sh <theme-name>`.
 
-## Themeable components
+See [`docs/vm-development.md`](docs/vm-development.md) for the full host→VM setup (SSH
+enablement, key auth, the PATH gotcha, verifying, reverting, and a troubleshooting log).
 
-| Component | What it styles |
-|-----------|---------------|
-| `text_unselected` / `text_selected` | General text / status bar |
-| `ribbon_unselected` / `ribbon_selected` | Tab bar tabs |
-| `frame_unselected` / `frame_selected` / `frame_highlight` | Pane borders (FG only — border color) |
-| `table_title` / `table_cell_unselected` / `table_cell_selected` | Table widgets |
-| `list_unselected` / `list_selected` | List widgets |
-| `exit_code_success` / `exit_code_error` | Exit status indicators |
+## Safety
+
+- **Non-destructive:** saving only ever writes inside `~/.config/omarchy/themes/<name>/`.
+- **No automatic apply:** the studio never switches your live theme on its own. The `a` action
+  runs `omarchy-theme-set` only after you confirm, and only when that command exists.
 
 ## Requirements
 
 - A terminal with true color support
 - Rust stable (only needed if building from source)
+- Omarchy (for applying themes); the studio runs and exports fine without it

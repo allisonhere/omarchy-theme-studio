@@ -1,8 +1,8 @@
-use crate::theme::ThemeComponentType;
+use crate::theme::{PaletteField, PaletteGroup, RgbColor};
 use crate::ui::color_picker::{
     contrast_text, hsv_field_cell, picker_layout, ColorPickerFocus, ColorPickerMode, EditableField,
 };
-use crate::ui::state::{App, InputMode, PreviewAttribute, PreviewElement};
+use crate::ui::state::{App, InputMode};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -13,224 +13,12 @@ use ratatui::{
 
 use super::state::normalize_theme_name;
 
-pub fn get_fg(comp: ThemeComponentType, theme: &crate::theme::Theme) -> Color {
-    let c = theme.get(comp);
-    Color::Rgb(c.base.r, c.base.g, c.base.b)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::parse_theme_kdl;
-    use ratatui::{
-        backend::{CrosstermBackend, TestBackend},
-        buffer::Buffer,
-        Terminal,
-    };
-    use std::{
-        io::{self, Write},
-        sync::{Arc, Mutex},
-    };
-
-    #[derive(Clone, Default)]
-    struct SharedWriter {
-        bytes: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl SharedWriter {
-        fn utf8(&self) -> String {
-            String::from_utf8(self.bytes.lock().unwrap().clone()).expect("valid utf8 escape stream")
-        }
-    }
-
-    impl Write for SharedWriter {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.bytes.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn dracula_app() -> App {
-        let mut app = App::default();
-        app.theme = parse_theme_kdl(include_str!("../bundled_themes/dracula.kdl"), "dracula")
-            .expect("dracula should parse");
-        app.theme_name_input = app.theme.name.clone();
-        app.message = Some(String::from("✓ Loaded: dracula"));
-        app
-    }
-
-    fn find_text(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
-        let width = buffer.area.width;
-        let height = buffer.area.height;
-        let chars: Vec<char> = needle.chars().collect();
-        let needle_width = chars.len() as u16;
-
-        for y in 0..height {
-            for x in 0..width.saturating_sub(needle_width).saturating_add(1) {
-                let matched = chars.iter().enumerate().all(|(offset, ch)| {
-                    buffer[(x + offset as u16, y)].symbol().starts_with(*ch)
-                });
-                if matched {
-                    return Some((x, y));
-                }
-            }
-        }
-        None
-    }
-
-    fn rgb(r: u8, g: u8, b: u8) -> Color {
-        Color::Rgb(r, g, b)
-    }
-
-    #[test]
-    fn dracula_preview_buffer_carries_expected_theme_styles() {
-        let app = dracula_app();
-        let text_unsel_fg = get_fg(ThemeComponentType::TextUnselected, &app.theme);
-        let text_unsel_bg = get_bg(ThemeComponentType::TextUnselected, &app.theme);
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let tab = find_text(buffer, "1:terminal").expect("selected tab should be rendered");
-        assert_eq!(buffer[tab].fg, rgb(0, 0, 0));
-        assert_eq!(buffer[tab].bg, rgb(80, 250, 123));
-
-        let selected_text =
-            find_text(buffer, "projects/").expect("selected text row should be rendered");
-        assert_eq!(buffer[selected_text].fg, text_unsel_fg);
-        assert_eq!(buffer[selected_text].bg, text_unsel_bg);
-
-        let table_title =
-            find_text(buffer, "Changes staged").expect("table title should be rendered");
-        assert_eq!(buffer[table_title].fg, rgb(80, 250, 123));
-        assert_eq!(buffer[table_title].bg, rgb(0, 0, 0));
-
-        let exit_ok = find_text(buffer, "exit 0").expect("success badge should be rendered");
-        assert_eq!(buffer[exit_ok].fg, rgb(80, 250, 123));
-        assert_eq!(buffer[exit_ok].bg, rgb(0, 0, 0));
-
-        let empty_pane_cell = &buffer[(2, 8)];
-        assert_eq!(empty_pane_cell.bg, rgb(0, 0, 0));
-        assert_eq!(empty_pane_cell.fg, Color::Reset);
-    }
-
-    #[test]
-    fn default_preview_right_pane_uses_unselected_frame_color() {
-        let app = dracula_app();
-        let expected = get_fg(ThemeComponentType::FrameUnselected, &app.theme);
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let right_pane_border = &buffer[(72, 2)];
-        assert_eq!(right_pane_border.fg, expected);
-    }
-
-    #[test]
-    fn default_preview_selected_pane_uses_unselected_frame_color() {
-        let app = dracula_app();
-        let expected = get_fg(ThemeComponentType::FrameSelected, &app.theme);
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let left_pane_border = &buffer[(0, 1)];
-        assert_eq!(left_pane_border.fg, expected);
-    }
-
-    #[test]
-    fn default_preview_projects_row_uses_unselected_text_colors() {
-        let app = dracula_app();
-        let expected_fg = get_fg(ThemeComponentType::TextUnselected, &app.theme);
-        let expected_bg = get_bg(ThemeComponentType::TextUnselected, &app.theme);
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let selected_text =
-            find_text(buffer, "projects/").expect("projects row should be rendered");
-        assert_eq!(buffer[selected_text].fg, expected_fg);
-        assert_eq!(buffer[selected_text].bg, expected_bg);
-    }
-
-    #[test]
-    fn pane_highlight_selection_switches_right_pane_to_highlight_frame_color() {
-        let mut app = dracula_app();
-        app.selected_element = PreviewElement::PaneHighlight;
-        let expected = get_fg(ThemeComponentType::FrameHighlight, &app.theme);
-
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let right_pane_border = &buffer[(72, 2)];
-        assert_eq!(right_pane_border.fg, expected);
-    }
-
-    #[test]
-    fn pane_selected_selection_switches_left_pane_to_selected_frame_color() {
-        let mut app = dracula_app();
-        app.selected_element = PreviewElement::PaneSelected;
-        let expected = get_fg(ThemeComponentType::FrameSelected, &app.theme);
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let left_pane_border = &buffer[(0, 1)];
-        assert_eq!(left_pane_border.fg, expected);
-    }
-
-    #[test]
-    fn text_selected_selection_switches_projects_row_to_selected_text_colors() {
-        let mut app = dracula_app();
-        app.selected_element = PreviewElement::TextSelected;
-        let expected_fg = get_fg(ThemeComponentType::TextSelected, &app.theme);
-        let expected_bg = get_bg(ThemeComponentType::TextSelected, &app.theme);
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
-        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
-        let buffer = &frame.buffer;
-
-        let selected_text =
-            find_text(buffer, "projects/").expect("projects row should be rendered");
-        assert_eq!(buffer[selected_text].fg, expected_fg);
-        assert_eq!(buffer[selected_text].bg, expected_bg);
-    }
-
-    #[test]
-    fn dracula_preview_crossterm_output_emits_truecolor_sequences() {
-        let app = dracula_app();
-        crossterm::style::force_color_output(true);
-        let writer = SharedWriter::default();
-        let capture = writer.clone();
-        let mut terminal =
-            Terminal::new(CrosstermBackend::new(writer)).expect("crossterm terminal");
-
-        terminal.draw(|f| app.render(f)).expect("draw should succeed");
-
-        let ansi = capture.utf8();
-        for color in [
-            "38;2;80;250;123",
-            "48;2;80;250;123",
-            "48;2;40;42;54",
-            "48;2;0;0;0",
-        ] {
-            assert!(
-                ansi.contains(color),
-                "expected ANSI output to contain {color}, got: {ansi}"
-            );
-        }
-        crossterm::style::force_color_output(false);
-    }
-}
-
-pub fn get_bg(comp: ThemeComponentType, theme: &crate::theme::Theme) -> Color {
-    let c = theme.get(comp);
-    Color::Rgb(c.background.r, c.background.g, c.background.b)
-}
+// ── Chrome (theme-independent) colors used for status bar and overlays ───────
+const CHROME_BG: Color = Color::Rgb(22, 22, 26);
+const CHROME_FG: Color = Color::Rgb(212, 212, 230);
+const CHROME_MUTED: Color = Color::Rgb(120, 120, 145);
+const CHROME_ACCENT_BG: Color = Color::Rgb(97, 88, 150);
+const CHROME_ACCENT_FG: Color = Color::Rgb(242, 240, 255);
 
 pub fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     let popup_width = width.min(area.width.saturating_sub(2)).max(1);
@@ -244,622 +32,533 @@ fn clip_text(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
-fn tui_rgb(color: crate::theme::RgbColor) -> Color {
+fn tui_rgb(color: RgbColor) -> Color {
     Color::Rgb(color.r, color.g, color.b)
 }
 
-fn selection_modifier(selected: bool) -> Modifier {
-    if selected {
-        Modifier::UNDERLINED
-    } else {
-        Modifier::empty()
+/// Within-group ("leaf") label — the group tab supplies the context.
+fn field_leaf_label(f: PaletteField) -> &'static str {
+    use PaletteField::*;
+    match f {
+        Background | WaybarBackground | LauncherBackground | TerminalBackground
+        | NotificationBackground => "Background",
+        Foreground | WaybarForeground | LauncherForeground | TerminalForeground => "Foreground",
+        Accent => "Accent",
+        Accent2 => "Accent 2",
+        ActiveBorder => "Active border",
+        InactiveBorder => "Inactive border",
+        WaybarActiveWorkspace => "Active workspace",
+        LauncherSelectedBackground => "Selected bg",
+        LauncherSelectedForeground => "Selected fg",
+        NotificationBorder => "Border",
+    }
+}
+
+/// Which preview region a palette field belongs to (drives selection highlight).
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum Region {
+    Desktop,
+    ActiveWindow,
+    InactiveWindow,
+    Waybar,
+    Launcher,
+    Terminal,
+    Notification,
+}
+
+fn region_of(field: PaletteField) -> Region {
+    use PaletteField::*;
+    match field {
+        Background | Foreground | Accent | Accent2 => Region::Desktop,
+        ActiveBorder => Region::ActiveWindow,
+        InactiveBorder => Region::InactiveWindow,
+        WaybarBackground | WaybarForeground | WaybarActiveWorkspace => Region::Waybar,
+        LauncherBackground | LauncherForeground | LauncherSelectedBackground
+        | LauncherSelectedForeground => Region::Launcher,
+        TerminalBackground | TerminalForeground => Region::Terminal,
+        NotificationBackground | NotificationBorder => Region::Notification,
     }
 }
 
 impl App {
+    fn sel(&self, region: Region) -> bool {
+        region_of(self.selected) == region
+    }
+
     pub fn render(&self, frame: &mut Frame) {
         match self.input_mode {
             InputMode::Preview => self.render_preview(frame),
-            InputMode::ColorPicker => self.render_color_picker_mode(frame),
-            InputMode::ThemeNameInput | InputMode::ThemeNameInputApply => {
-                self.render_theme_name_input_mode(frame)
+            InputMode::ColorPicker => {
+                self.render_preview(frame);
+                self.render_color_picker_overlay(frame);
             }
-            InputMode::ThemeLoad => self.render_theme_load_mode(frame),
+            InputMode::ThemeNameInput => {
+                self.render_preview(frame);
+                self.render_theme_name_input_overlay(frame);
+            }
+            InputMode::ApplyConfirm => {
+                self.render_preview(frame);
+                self.render_apply_confirm_overlay(frame);
+            }
+            InputMode::FieldSearch => {
+                self.render_preview(frame);
+                self.render_field_search_overlay(frame);
+            }
+            InputMode::ThemeLoad => {
+                self.render_preview(frame);
+                self.render_theme_load_overlay(frame);
+            }
             InputMode::ThemeLoadRename => {
-                self.render_theme_load_mode(frame);
+                self.render_preview(frame);
+                self.render_theme_load_overlay(frame);
                 self.render_theme_name_input_overlay(frame);
             }
             InputMode::ThemeLoadDeleteConfirm => {
-                self.render_theme_load_mode(frame);
+                self.render_preview(frame);
+                self.render_theme_load_overlay(frame);
             }
             InputMode::UpdateRestartConfirm => {
                 self.render_preview(frame);
                 self.render_update_restart_overlay(frame);
             }
-            InputMode::Help => self.render_help_mode(frame),
+            InputMode::Help => {
+                self.render_preview(frame);
+                self.render_help_overlay(frame);
+            }
         }
     }
 
-    // ── Preview layout (full Zellij screen) ──────────────────────────────
+    // ── Mock Hyprland desktop preview ────────────────────────────────────────
 
     fn render_preview(&self, frame: &mut Frame) {
+        let p = &self.theme.palette;
         let area = frame.area();
-        let [tab_bar, main, status_bar] = Layout::vertical([
+        let [tabs, selector, waybar, body, status] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(1),
         ])
         .areas(area);
 
-        self.render_zellij_tab_bar(frame, tab_bar);
-        self.render_zellij_panes(frame, main);
-        self.render_zellij_status_bar(frame, status_bar);
-    }
+        // Desktop backdrop
+        frame.render_widget(Block::default().style(Style::new().bg(tui_rgb(p.background))), body);
 
-    fn render_zellij_tab_bar(&self, frame: &mut Frame, area: Rect) {
-        let t = &self.theme;
-        let sel_fg = get_fg(ThemeComponentType::RibbonSelected, t);
-        let sel_bg = get_bg(ThemeComponentType::RibbonSelected, t);
-        let unsel_fg = get_fg(ThemeComponentType::RibbonUnselected, t);
-        let unsel_bg = get_bg(ThemeComponentType::RibbonUnselected, t);
-        let bar_bg = get_bg(ThemeComponentType::TextUnselected, t);
-        let bar_fg = get_fg(ThemeComponentType::TextUnselected, t);
+        self.render_group_tabs(frame, tabs);
+        self.render_field_selector(frame, selector);
+        self.render_waybar(frame, waybar);
 
-        let is_tab_sel = self.selected_element == PreviewElement::TabSelected;
-        let is_tab_u1 = self.selected_element == PreviewElement::TabUnselected1;
-        let is_tab_u2 = self.selected_element == PreviewElement::TabUnselected2;
-
-        let layout_label = " layout: default ";
-
-        // Session name (plain, no pill shape — matches real Zellij)
-        let mut spans: Vec<Span> = vec![Span::styled(
-            " zellij ",
-            Style::new()
-                .fg(bar_fg)
-                .bg(bar_bg)
-                .add_modifier(Modifier::BOLD),
-        )];
-
-        spans.push(Span::styled(
-            " 1:terminal ",
-            Style::new()
-                .fg(sel_fg)
-                .bg(sel_bg)
-                .add_modifier(Modifier::BOLD | selection_modifier(is_tab_sel)),
-        ));
-        spans.push(Span::styled(" ", Style::new().bg(bar_bg)));
-
-        spans.push(Span::styled(
-            " 2:bash ",
-            Style::new()
-                .fg(unsel_fg)
-                .bg(unsel_bg)
-                .add_modifier(Modifier::BOLD | selection_modifier(is_tab_u1)),
-        ));
-        spans.push(Span::styled(" ", Style::new().bg(bar_bg)));
-
-        spans.push(Span::styled(
-            " 3:nvim ",
-            Style::new()
-                .fg(unsel_fg)
-                .bg(unsel_bg)
-                .add_modifier(Modifier::BOLD | selection_modifier(is_tab_u2)),
-        ));
-        spans.push(Span::styled(" ", Style::new().bg(bar_bg)));
-
-        let used: usize = spans.iter().map(|s| s.width()).sum::<usize>() + layout_label.len();
-        let fill = (area.width as usize).saturating_sub(used);
-        spans.push(Span::styled(" ".repeat(fill), Style::new().bg(bar_bg)));
-        spans.push(Span::styled(
-            layout_label,
-            Style::new().fg(bar_fg).bg(bar_bg),
-        ));
-
-        frame.render_widget(
-            Paragraph::new(vec![Line::from(spans)]).style(Style::new().bg(bar_bg)),
-            area,
-        );
-    }
-
-    fn render_zellij_panes(&self, frame: &mut Frame, area: Rect) {
-        let t = &self.theme;
-        let text_fg = get_fg(ThemeComponentType::TextUnselected, t);
-        let canvas_bg = get_bg(ThemeComponentType::TextUnselected, t);
-
-        frame.render_widget(Paragraph::new("").style(Style::new().bg(canvas_bg)), area);
-
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .areas(area);
-
-        let [top_left, bottom_left] =
-            Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(left);
-
-        self.render_pane_selected(frame, top_left, text_fg);
-        self.render_pane_unselected(frame, bottom_left, text_fg);
-        self.render_pane_highlight(frame, right, text_fg);
-    }
-
-    fn render_pane_selected(&self, frame: &mut Frame, area: Rect, text_fg: Color) {
-        let t = &self.theme;
-        let is_editing_border = self.selected_element == PreviewElement::PaneSelected;
-        let is_editing_text = self.selected_element == PreviewElement::TextSelected;
-        let pane_bg = get_bg(ThemeComponentType::TextUnselected, t);
-
-        let border_color = get_fg(ThemeComponentType::FrameSelected, t);
-        let border_style = Style::new()
-            .fg(border_color)
-            .add_modifier(if is_editing_border {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
-
-        let text_sel_fg = get_fg(ThemeComponentType::TextSelected, t);
-        let text_sel_bg = get_bg(ThemeComponentType::TextSelected, t);
-
-        let content = vec![
-            Line::from(Span::styled("$ ls", Style::new().fg(text_fg).bg(pane_bg))),
-            Line::from(Span::styled(
-                "  documents/  downloads/",
-                Style::new().fg(text_fg).bg(pane_bg),
-            )),
-            Line::from(Span::styled(
-                if is_editing_text {
-                    " ▌projects/ ▐ ◀ Text Selected"
-                } else {
-                    " ▌projects/▐ "
-                },
-                if is_editing_text {
-                    Style::new()
-                        .fg(text_sel_fg)
-                        .bg(text_sel_bg)
-                        .add_modifier(Modifier::BOLD | selection_modifier(is_editing_text))
-                } else {
-                    Style::new().fg(text_fg).bg(pane_bg)
-                },
-            )),
-            Line::from(Span::styled(
-                "  videos/     music/",
-                Style::new().fg(text_fg).bg(pane_bg),
-            )),
-            Line::from(Span::styled("$ █", Style::new().fg(text_fg).bg(pane_bg))),
-        ];
-
-        let block = Block::bordered()
-            .border_type(BorderType::Double)
-            .title(" Pane (Selected) ")
-            .title_style(border_style)
-            .border_style(border_style)
-            .style(Style::new().bg(pane_bg));
-
-        frame.render_widget(Paragraph::new(content).block(block), area);
-    }
-
-    fn render_pane_unselected(&self, frame: &mut Frame, area: Rect, text_fg: Color) {
-        let is_editing = self.selected_element == PreviewElement::PaneUnselected;
-        let pane_bg = get_bg(ThemeComponentType::TextUnselected, &self.theme);
-        let border_color = get_fg(ThemeComponentType::FrameUnselected, &self.theme);
-        let border_style = Style::new().fg(border_color).add_modifier(if is_editing {
-            Modifier::BOLD
+        // Optional "Desktop" banner when a desktop-group color is selected.
+        let body_inner = if self.sel(Region::Desktop) {
+            let [banner, rest] =
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(body);
+            let line = Line::from(vec![
+                Span::styled(" Desktop ", Style::new().fg(tui_rgb(p.background)).bg(tui_rgb(p.accent)).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("  background / foreground / accent · editing {} ", self.selected.label()),
+                    Style::new().fg(tui_rgb(p.foreground)).bg(tui_rgb(p.background)),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(line).style(Style::new().bg(tui_rgb(p.background))), banner);
+            rest
         } else {
-            Modifier::empty()
-        });
+            body
+        };
 
-        let content = vec![
-            Line::from(Span::styled(
-                "$ git status",
-                Style::new().fg(text_fg).bg(pane_bg),
-            )),
-            Line::from(Span::styled(
-                "On branch main",
-                Style::new().fg(text_fg).bg(pane_bg),
-            )),
-            Line::from(Span::styled(
-                "nothing to commit",
-                Style::new().fg(text_fg).bg(pane_bg),
-            )),
-        ];
+        let [top, bottom] =
+            Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(body_inner);
+        let [active, inactive] =
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(top);
+        let [launcher, terminal, notification] = Layout::horizontal([
+            Constraint::Percentage(36),
+            Constraint::Percentage(34),
+            Constraint::Percentage(30),
+        ])
+        .areas(bottom);
 
-        let block = Block::bordered()
-            .border_type(BorderType::Plain)
-            .title(" Pane (Unselected) ")
-            .title_style(border_style)
-            .border_style(border_style)
-            .style(Style::new().bg(pane_bg));
+        self.render_window(frame, active, true);
+        self.render_window(frame, inactive, false);
+        self.render_launcher(frame, launcher);
+        self.render_terminal(frame, terminal);
+        self.render_notification(frame, notification);
 
-        frame.render_widget(Paragraph::new(content).block(block), area);
+        self.render_status_bar(frame, status);
     }
 
-    fn render_pane_highlight(&self, frame: &mut Frame, area: Rect, text_fg: Color) {
-        let t = &self.theme;
-        let is_editing_frame = self.selected_element == PreviewElement::PaneHighlight;
-        let pane_bg = get_bg(ThemeComponentType::TextUnselected, t);
-        let (border_color, border_type, title) = if is_editing_frame {
-            (
-                get_fg(ThemeComponentType::FrameHighlight, t),
-                BorderType::Thick,
-                " Pane (Highlight) ",
-            )
-        } else {
-            (
-                get_fg(ThemeComponentType::FrameUnselected, t),
-                BorderType::Plain,
-                " Pane ",
-            )
-        };
-        let border_style = Style::new()
-            .fg(border_color)
-            .add_modifier(if is_editing_frame {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
-
-        // Component colors
-        let tbl_title_fg = get_fg(ThemeComponentType::TableTitle, t);
-        let tbl_title_bg = get_bg(ThemeComponentType::TableTitle, t);
-        let tbl_sel_fg = get_fg(ThemeComponentType::TableCellSelected, t);
-        let tbl_sel_bg = get_bg(ThemeComponentType::TableCellSelected, t);
-        let tbl_unsel_fg = get_fg(ThemeComponentType::TableCellUnselected, t);
-        let tbl_unsel_bg = get_bg(ThemeComponentType::TableCellUnselected, t);
-        let list_sel_fg = get_fg(ThemeComponentType::ListSelected, t);
-        let list_sel_bg = get_bg(ThemeComponentType::ListSelected, t);
-        let list_unsel_fg = get_fg(ThemeComponentType::ListUnselected, t);
-        let list_unsel_bg = get_bg(ThemeComponentType::ListUnselected, t);
-        let exit_ok_fg = get_fg(ThemeComponentType::ExitCodeSuccess, t);
-        let exit_ok_bg = get_bg(ThemeComponentType::ExitCodeSuccess, t);
-        let exit_err_fg = get_fg(ThemeComponentType::ExitCodeError, t);
-        let exit_err_bg = get_bg(ThemeComponentType::ExitCodeError, t);
-
-        let sel_mod = |elem: PreviewElement| -> Modifier {
-            Modifier::BOLD | selection_modifier(self.selected_element == elem)
-        };
-
-        let content = vec![
-            // git status header lines
-            Line::from(Span::styled("$ git status", Style::new().fg(text_fg).bg(pane_bg))),
-            Line::from(Span::styled("On branch main", Style::new().fg(text_fg).bg(pane_bg))),
-            Line::from(Span::raw("")),
-            // Changes staged — table_title style
-            Line::from(Span::styled(
-                " Changes staged",
-                Style::new()
-                    .fg(tbl_title_fg)
-                    .bg(tbl_title_bg)
-                    .add_modifier(sel_mod(PreviewElement::TableTitle)),
-            )),
-            Line::from(Span::styled(
-                "  modified: main.rs",
-                Style::new()
-                    .fg(tbl_sel_fg)
-                    .bg(tbl_sel_bg)
-                    .add_modifier(sel_mod(PreviewElement::TableCellSelected)),
-            )),
-            Line::from(Span::styled(
-                "  modified: lib.rs",
-                Style::new()
-                    .fg(tbl_unsel_fg)
-                    .bg(tbl_unsel_bg)
-                    .add_modifier(sel_mod(PreviewElement::TableCellUnselected)),
-            )),
-            Line::from(Span::raw("")),
-            // Untracked files — list style
-            Line::from(Span::styled(
-                " Untracked files",
-                Style::new()
-                    .fg(list_sel_fg)
-                    .bg(list_sel_bg)
-                    .add_modifier(sel_mod(PreviewElement::ListSelected)),
-            )),
-            Line::from(Span::styled(
-                "  src/utils.rs",
-                Style::new()
-                    .fg(list_unsel_fg)
-                    .bg(list_unsel_bg)
-                    .add_modifier(sel_mod(PreviewElement::ListUnselected)),
-            )),
-            Line::from(Span::styled(
-                "  README.md",
-                Style::new().fg(list_unsel_fg).bg(list_unsel_bg),
-            )),
-            Line::from(Span::styled("", Style::new().bg(pane_bg))),
-            // Exit code pills
-            Line::from(vec![
-                Span::styled(" ", Style::new().bg(pane_bg)),
-                Span::styled(
-                    " exit 0 ",
-                    Style::new()
-                        .fg(exit_ok_fg)
-                        .bg(exit_ok_bg)
-                        .add_modifier(sel_mod(PreviewElement::ExitSuccess)),
-                ),
-                Span::styled("  ", Style::new().bg(pane_bg)),
-                Span::styled(
-                    " exit 1 ",
-                    Style::new()
-                        .fg(exit_err_fg)
-                        .bg(exit_err_bg)
-                        .add_modifier(sel_mod(PreviewElement::ExitError)),
-                ),
-            ]),
-        ];
-
-        let block = Block::bordered()
-            .border_type(border_type)
-            .title(title)
-            .title_style(border_style)
-            .border_style(border_style)
-            .style(Style::new().bg(pane_bg));
-
-        frame.render_widget(Paragraph::new(content).block(block), area);
+    fn region_border(&self, region: Region, color: RgbColor) -> (Style, BorderType) {
+        let selected = self.sel(region);
+        let style = Style::new()
+            .fg(tui_rgb(color))
+            .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() });
+        let bt = if selected { BorderType::Thick } else { BorderType::Rounded };
+        (style, bt)
     }
 
-    fn render_zellij_status_bar(&self, frame: &mut Frame, area: Rect) {
-        let t = &self.theme;
-        let is_editing_status = self.selected_element == PreviewElement::StatusBar;
-        let bar_bg = get_bg(ThemeComponentType::TextUnselected, t);
-        let sel_fg = get_fg(ThemeComponentType::RibbonSelected, t);
-        let sel_bg = get_bg(ThemeComponentType::RibbonSelected, t);
-        let unsel_fg = get_fg(ThemeComponentType::RibbonUnselected, t);
-        let unsel_bg = get_bg(ThemeComponentType::RibbonUnselected, t);
-
-        // Mode label changes based on app state and selection
-        let (mode_label, mode_fg, mode_bg) = if is_editing_status {
-            (" STATUS ", sel_fg, sel_bg)
+    fn title(&self, region: Region, text: &str) -> String {
+        if self.sel(region) {
+            format!(" ▶ {} ◀ ", text)
         } else {
-            match self.input_mode {
-                InputMode::ColorPicker => (" COLOR  ", sel_fg, sel_bg),
-                InputMode::Preview => (" NORMAL ", sel_fg, sel_bg),
-                InputMode::ThemeNameInput | InputMode::ThemeNameInputApply => {
-                    (" APPLY  ", sel_fg, sel_bg)
-                }
-                InputMode::ThemeLoad => (" LOAD   ", sel_fg, sel_bg),
-                InputMode::ThemeLoadRename => (" RENAME ", sel_fg, sel_bg),
-                InputMode::ThemeLoadDeleteConfirm => (" DELETE ", Color::Rgb(255, 100, 100), Color::Rgb(80, 20, 20)),
-                InputMode::UpdateRestartConfirm => (" UPDATE ", sel_fg, sel_bg),
-                InputMode::Help => (" HELP   ", sel_fg, sel_bg),
-            }
-        };
+            format!(" {} ", text)
+        }
+    }
 
-        let pill_full = |key: &str, action: &str| -> Vec<Span<'static>> {
-            vec![
-                Span::styled("", Style::new().fg(sel_bg).bg(bar_bg)),
-                Span::styled(
-                    format!(" {} ", key),
-                    Style::new().fg(sel_fg).bg(sel_bg).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("", Style::new().fg(unsel_bg).bg(sel_bg)),
-                Span::styled(
-                    format!(" {} ", action),
-                    Style::new().fg(unsel_fg).bg(unsel_bg),
-                ),
-                Span::styled("", Style::new().fg(unsel_bg).bg(bar_bg)),
-            ]
-        };
-
-        let pill_key_only = |key: &str| -> Vec<Span<'static>> {
-            vec![
-                Span::styled("", Style::new().fg(sel_bg).bg(bar_bg)),
-                Span::styled(
-                    format!(" {} ", key),
-                    Style::new().fg(sel_fg).bg(sel_bg).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("", Style::new().fg(sel_bg).bg(bar_bg)),
-            ]
-        };
-
-        let gap = || Span::styled(" ", Style::new().bg(bar_bg));
-
-        // Measure a candidate set of pill spans to get their true rendered width.
-        let spans_width = |spans: &[Span]| -> usize { spans.iter().map(|s| s.width()).sum() };
-
-        // (key, long label, short label)
-        let bindings: &[(&str, &str, &str)] = match self.input_mode {
-            InputMode::Preview => &[
-                ("↑↓←→", "NAVIGATE",   "NAV"),
-                ("c",    "COLOR",      "CLR"),
-                ("U",    "UPDATE",     "UPD"),
-                ("s",    "SAVE AS",    "SAVE"),
-                ("l",    "LOAD",       "LD"),
-                ("a",    "SAVE+APPLY", "APPLY"),
-                ("?",    "HELP",       "?"),
-                ("q",    "QUIT",       "QT"),
-            ],
-            InputMode::ColorPicker => {
-                const BINDINGS: &[(&str, &str, &str)] = &[
-                    ("tab",    "FOCUS",   "TAB"),
-                    ("m",      "MODE",    "MD"),
-                    ("f",      "FG/BG",   "F/B"),
-                    ("drag",   "PICK",    "PK"),
-                    ("#",      "HEX",     "HX"),
-                    ("Enter",  "EDIT/OK", "OK"),
-                    ("Esc",    "CANCEL",  "ESC"),
-                ];
-                BINDINGS
-            }
-            InputMode::ThemeNameInput | InputMode::ThemeNameInputApply => &[
-                ("type",  "NAME",   "NM"),
-                ("Enter", "SAVE",   "OK"),
-                ("Esc",   "CANCEL", "ESC"),
-            ],
-            InputMode::ThemeLoad => &[
-                ("↑↓",   "SELECT",  "SEL"),
-                ("d",    "DEFAULT", "DEF"),
-                ("s",    "SAVED",   "SVD"),
-                ("Enter","LOAD",    "LD"),
-                ("a",    "APPLY",   "AP"),
-                ("r",    "RENAME",  "RN"),
-                ("x",    "DELETE",  "DEL"),
-                ("Esc",  "CANCEL",  "ESC"),
-            ],
-            InputMode::ThemeLoadRename => &[
-                ("type",  "NAME",   "NM"),
-                ("Enter", "RENAME", "OK"),
-                ("Esc",   "CANCEL", "ESC"),
-            ],
-            InputMode::ThemeLoadDeleteConfirm => &[
-                ("y", "CONFIRM", "Y"),
-                ("n", "CANCEL",  "N"),
-            ],
-            InputMode::UpdateRestartConfirm => &[
-                ("Enter", "RESTART", "OK"),
-                ("l",     "LATER",   "L"),
-                ("Esc",   "LATER",   "X"),
-            ],
-            InputMode::Help => &[
-                ("↑↓", "SCROLL", "SCR"),
-                ("Pg", "JUMP",   "PG"),
-                ("Esc", "CLOSE", "X"),
-            ],
-        };
-
-        // ── Pick label level by measuring actual span widths ──────────────
-        let current_color = self.get_color_by_attr(self.selected_attribute);
-        let info = format!(
-            " {}{} │ {} {} #{:02x}{:02x}{:02x} ",
-            self.theme.name,
-            if self.dirty { "*" } else { "" },
-            self.selected_element.label(),
-            self.selected_attribute.label(),
-            current_color.r,
-            current_color.g,
-            current_color.b,
-        );
-        let right_w = info.chars().count()
-            + self.message.as_ref().map(|m| m.chars().count() + 3).unwrap_or(0);
-
-        // mode pill spans (built once, measured)
-        let mode_pill_spans: Vec<Span> = vec![
-            Span::styled("", Style::new().fg(mode_bg).bg(bar_bg)),
-            Span::styled(mode_label, Style::new().fg(mode_fg).bg(mode_bg).add_modifier(Modifier::BOLD)),
-            Span::styled("", Style::new().fg(mode_bg).bg(bar_bg)),
-            gap(),
-        ];
-        let mode_pill_w = spans_width(&mode_pill_spans);
-
-        let measure_pills = |label_idx: usize| -> usize {
-            bindings.iter().map(|(k, l, s)| {
-                let action = if label_idx == 0 { l } else { s };
-                let mut w = spans_width(&pill_full(k, action));
-                w += gap().width();
-                w
-            }).sum()
-        };
-        let measure_keys_only = || -> usize {
-            bindings.iter().map(|(k, _, _)| {
-                spans_width(&pill_key_only(k)) + gap().width()
-            }).sum()
-        };
-
-        let available = (area.width as usize).saturating_sub(mode_pill_w + right_w);
-        let level = if measure_pills(0) <= available { 0 }
-                    else if measure_pills(1) <= available { 1 }
-                    else { 2 };
-        let _ = measure_keys_only; // silence unused warning
+    fn render_waybar(&self, frame: &mut Frame, area: Rect) {
+        let p = &self.theme.palette;
+        let bg = tui_rgb(p.waybar_background);
+        let fg = tui_rgb(p.waybar_foreground);
+        let active = tui_rgb(p.waybar_active_workspace);
+        let highlight = self.sel(Region::Waybar);
 
         let mut spans: Vec<Span> = Vec::new();
-
-        // ── Mode pill ─────────────────────────────────────────────────────
-        spans.push(Span::styled("", Style::new().fg(mode_bg).bg(bar_bg)));
-        spans.push(Span::styled(
-            mode_label,
-            Style::new()
-                .fg(mode_fg)
-                .bg(mode_bg)
-                .add_modifier(Modifier::BOLD | selection_modifier(is_editing_status)),
-        ));
-        spans.push(Span::styled("", Style::new().fg(mode_bg).bg(bar_bg)));
-        spans.push(gap());
-
-        // ── Keybinding pills ──────────────────────────────────────────────
-        for (key, long, short) in bindings {
-            match level {
-                0 => spans.extend(pill_full(key, long)),
-                1 => spans.extend(pill_full(key, short)),
-                _ => spans.extend(pill_key_only(key)),
-            }
-            spans.push(gap());
-        }
-
-        // ── Right side: element info + optional save message ──────────────
-        let current_color = self.get_color_by_attr(self.selected_attribute);
-        let info = format!(
-            " {}{} │ {} {} #{:02x}{:02x}{:02x} ",
-            self.theme.name,
-            if self.dirty { "*" } else { "" },
-            self.selected_element.label(),
-            self.selected_attribute.label(),
-            current_color.r,
-            current_color.g,
-            current_color.b,
-        );
-
-        let used: usize = spans.iter().map(|s| s.width()).sum();
-        let fill = (area.width as usize).saturating_sub(used + right_w);
-        spans.push(Span::styled(" ".repeat(fill), Style::new().bg(bar_bg)));
-
-        if let Some(ref msg) = self.message {
-            let msg_color = if msg.starts_with('✗') { Color::Red } else { Color::Green };
-            spans.push(Span::styled(
-                format!(" {} ", msg),
-                Style::new()
-                    .fg(msg_color)
-                    .bg(bar_bg)
-                    .add_modifier(Modifier::BOLD),
-            ));
+        if highlight {
+            spans.push(Span::styled(" ▶ ", Style::new().fg(active).bg(bg).add_modifier(Modifier::BOLD)));
         } else {
-            use crate::ui::state::UpdateStatus;
-            let (update_text, update_color, bold) = match &self.update_status {
-                UpdateStatus::Checking    => (Some(" checking for update… ".to_string()),  Color::DarkGray, false),
-                UpdateStatus::Available(v) => (Some(format!(" ↑ {} available — press U ", v)), Color::Yellow,   true),
-                UpdateStatus::Downloading => (Some(" downloading update… ".to_string()),   Color::Yellow,   false),
-                UpdateStatus::Done        => (Some(" ✓ updated — restart to apply ".to_string()), Color::Green, true),
-                UpdateStatus::Failed(e)   => (Some(format!(" update check failed: {} ", e)), Color::Red,    false),
-                _                         => (None, Color::Reset, false),
-            };
-            if let Some(text) = update_text {
-                let mut style = Style::new().fg(update_color).bg(bar_bg);
-                if bold { style = style.add_modifier(Modifier::BOLD); }
-                spans.push(Span::styled(text, style));
-            }
+            spans.push(Span::styled(" ", Style::new().bg(bg)));
         }
-
+        // Workspaces — first is active
         spans.push(Span::styled(
-            info,
-            Style::new()
-                .fg(Color::Rgb(167, 139, 250))
-                .bg(bar_bg)
-                .add_modifier(Modifier::BOLD),
+            " 1 ",
+            Style::new().fg(tui_rgb(p.waybar_background)).bg(active).add_modifier(Modifier::BOLD),
         ));
+        spans.push(Span::styled(" 2 ", Style::new().fg(fg).bg(bg)));
+        spans.push(Span::styled(" 3 ", Style::new().fg(fg).bg(bg)));
+
+        let right = "  12:34   80%   ";
+        let used: usize = spans.iter().map(|s| s.width()).sum::<usize>() + right.chars().count();
+        let fill = (area.width as usize).saturating_sub(used);
+        spans.push(Span::styled(" ".repeat(fill), Style::new().bg(bg)));
+        spans.push(Span::styled(right, Style::new().fg(fg).bg(bg)));
 
         frame.render_widget(
-            Paragraph::new(vec![Line::from(spans)]).style(Style::new().bg(bar_bg)),
+            Paragraph::new(Line::from(spans)).style(Style::new().bg(bg)),
             area,
         );
     }
 
-    // ── Color picker overlay ─────────────────────────────────────────────
+    fn render_window(&self, frame: &mut Frame, area: Rect, active: bool) {
+        let p = &self.theme.palette;
+        let (region, border_color, label) = if active {
+            (Region::ActiveWindow, p.active_border, "Active window — Hyprland")
+        } else {
+            (Region::InactiveWindow, p.inactive_border, "Inactive window")
+        };
+        let (border_style, bt) = self.region_border(region, border_color);
+        let body_fg = if active { p.foreground } else { p.foreground.shade(-40) };
 
-    fn render_color_picker_mode(&self, frame: &mut Frame) {
-        self.render_preview(frame);
-        self.render_color_picker_overlay(frame);
+        let content = vec![
+            Line::from(Span::styled(
+                if active { "  ~/projects/omarchy-theme-studio" } else { "  ~/notes" },
+                Style::new().fg(tui_rgb(body_fg)).bg(tui_rgb(p.background)),
+            )),
+            Line::from(Span::styled(
+                if active { "  cargo run --release" } else { "  it can wait…" },
+                Style::new().fg(tui_rgb(body_fg)).bg(tui_rgb(p.background)),
+            )),
+        ];
+
+        let block = Block::bordered()
+            .border_type(bt)
+            .title(self.title(region, label))
+            .title_style(border_style)
+            .border_style(border_style)
+            .style(Style::new().bg(tui_rgb(p.background)));
+        frame.render_widget(Paragraph::new(content).block(block), area);
     }
 
-    fn render_theme_name_input_mode(&self, frame: &mut Frame) {
-        self.render_preview(frame);
-        self.render_theme_name_input_overlay(frame);
+    fn render_launcher(&self, frame: &mut Frame, area: Rect) {
+        let p = &self.theme.palette;
+        let (border_style, bt) = self.region_border(Region::Launcher, p.accent);
+        let lbg = tui_rgb(p.launcher_background);
+        let lfg = tui_rgb(p.launcher_foreground);
+        let sbg = tui_rgb(p.launcher_selected_background);
+        let sfg = tui_rgb(p.launcher_selected_foreground);
+
+        let block = Block::bordered()
+            .border_type(bt)
+            .title(self.title(Region::Launcher, "Launcher"))
+            .title_style(border_style)
+            .border_style(border_style)
+            .style(Style::new().bg(lbg));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let rows = vec![
+            Line::from(Span::styled(" Search…", Style::new().fg(lfg).bg(lbg).add_modifier(Modifier::DIM))),
+            Line::from(Span::styled(" Firefox", Style::new().fg(sfg).bg(sbg).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(" Terminal", Style::new().fg(lfg).bg(lbg))),
+            Line::from(Span::styled(" Files", Style::new().fg(lfg).bg(lbg))),
+        ];
+        frame.render_widget(Paragraph::new(rows).style(Style::new().bg(lbg)), inner);
     }
 
-    fn render_theme_load_mode(&self, frame: &mut Frame) {
-        self.render_preview(frame);
-        self.render_theme_load_overlay(frame);
+    fn render_terminal(&self, frame: &mut Frame, area: Rect) {
+        let p = &self.theme.palette;
+        let (border_style, bt) = self.region_border(Region::Terminal, p.accent2);
+        let tbg = tui_rgb(p.terminal_background);
+        let tfg = tui_rgb(p.terminal_foreground);
+
+        let block = Block::bordered()
+            .border_type(bt)
+            .title(self.title(Region::Terminal, "Terminal"))
+            .title_style(border_style)
+            .border_style(border_style)
+            .style(Style::new().bg(tbg));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(" $ ", Style::new().fg(tui_rgb(p.accent)).bg(tbg)),
+                Span::styled("omarchy-theme-set mytheme", Style::new().fg(tfg).bg(tbg)),
+            ]),
+            Line::from(Span::styled("  ✓ applied", Style::new().fg(tfg).bg(tbg))),
+            Line::from(vec![
+                Span::styled(" $ ", Style::new().fg(tui_rgb(p.accent)).bg(tbg)),
+                Span::styled("█", Style::new().fg(tfg).bg(tbg)),
+            ]),
+        ];
+        frame.render_widget(Paragraph::new(lines).style(Style::new().bg(tbg)), inner);
     }
 
-    fn render_help_mode(&self, frame: &mut Frame) {
-        self.render_preview(frame);
-        self.render_help_overlay(frame);
+    fn render_notification(&self, frame: &mut Frame, area: Rect) {
+        let p = &self.theme.palette;
+        let (border_style, bt) = self.region_border(Region::Notification, p.notification_border);
+        let nbg = tui_rgb(p.notification_background);
+        let nfg = tui_rgb(p.foreground);
+
+        let block = Block::bordered()
+            .border_type(bt)
+            .title(self.title(Region::Notification, "Notification"))
+            .title_style(border_style)
+            .border_style(border_style)
+            .style(Style::new().bg(nbg));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let lines = vec![
+            Line::from(Span::styled(" 🔔 Theme exported", Style::new().fg(nfg).bg(nbg).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(" ~/.config/omarchy", Style::new().fg(nfg).bg(nbg))),
+        ];
+        frame.render_widget(Paragraph::new(lines).style(Style::new().bg(nbg)), inner);
     }
+
+    /// Top row: the six group pills with the active one highlighted.
+    fn render_group_tabs(&self, frame: &mut Frame, area: Rect) {
+        let active = self.selected.group();
+        let mut spans: Vec<Span> = Vec::new();
+        for (i, g) in PaletteGroup::all().iter().enumerate() {
+            let is_active = *g == active;
+            let (fg, bg, m) = if is_active {
+                (CHROME_ACCENT_FG, CHROME_ACCENT_BG, Modifier::BOLD)
+            } else {
+                (CHROME_MUTED, CHROME_BG, Modifier::empty())
+            };
+            spans.push(Span::styled(
+                format!(" {} {} ", i + 1, g.label()),
+                Style::new().fg(fg).bg(bg).add_modifier(m),
+            ));
+            spans.push(Span::styled(" ", Style::new().bg(CHROME_BG)));
+        }
+        spans.push(Span::styled(
+            "  1-6 / ←→ Tab group · ↑↓ field · / find",
+            Style::new().fg(CHROME_MUTED).bg(CHROME_BG),
+        ));
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::new().bg(CHROME_BG)),
+            area,
+        );
+    }
+
+    /// Prominent row under the group tabs: the active group's fields as swatch
+    /// chips, the selected one boxed and highlighted. This is the main,
+    /// front-and-center indicator of what you're editing.
+    fn render_field_selector(&self, frame: &mut Frame, area: Rect) {
+        const SEL_BG: Color = Color::Rgb(44, 41, 60);
+        let group = self.selected.group();
+        let palette = &self.theme.palette;
+
+        let mut chips: Vec<Span> = Vec::new();
+        for f in group.fields() {
+            let selected = *f == self.selected;
+            let swatch = tui_rgb(f.get(palette));
+            let label = field_leaf_label(*f);
+            if selected {
+                chips.push(Span::styled("▏", Style::new().fg(CHROME_ACCENT_FG).bg(SEL_BG)));
+                chips.push(Span::styled("  ", Style::new().bg(swatch)));
+                chips.push(Span::styled(
+                    format!(" {} ", label),
+                    Style::new().fg(CHROME_ACCENT_FG).bg(SEL_BG).add_modifier(Modifier::BOLD),
+                ));
+                chips.push(Span::styled("▕", Style::new().fg(CHROME_ACCENT_FG).bg(SEL_BG)));
+            } else {
+                chips.push(Span::styled(" ", Style::new().bg(CHROME_BG)));
+                chips.push(Span::styled("  ", Style::new().bg(swatch)));
+                chips.push(Span::styled(
+                    format!(" {} ", label),
+                    Style::new().fg(CHROME_MUTED).bg(CHROME_BG),
+                ));
+                chips.push(Span::styled(" ", Style::new().bg(CHROME_BG)));
+            }
+            chips.push(Span::styled("  ", Style::new().bg(CHROME_BG)));
+        }
+
+        // Center the chips in the row.
+        let used: usize = chips.iter().map(|s| s.width()).sum();
+        let pad = (area.width as usize).saturating_sub(used) / 2;
+        let mut line = vec![Span::styled(" ".repeat(pad), Style::new().bg(CHROME_BG))];
+        line.extend(chips);
+        frame.render_widget(
+            Paragraph::new(Line::from(line)).style(Style::new().bg(CHROME_BG)),
+            area,
+        );
+    }
+
+    fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
+        let color = self.current_color();
+        let hints = " c color · y/p yank · u undo · s save · l load · a apply · / find · ? help · q quit";
+        let info = format!(
+            " {}{} · {} · {} ",
+            self.theme.name,
+            if self.dirty { "*" } else { "" },
+            self.selected.label(),
+            color.to_hex(),
+        );
+
+        let mut spans: Vec<Span> =
+            vec![Span::styled(hints, Style::new().fg(CHROME_MUTED).bg(CHROME_BG))];
+
+        let right_w = info.chars().count() + 2;
+        let used: usize = spans.iter().map(|s| s.width()).sum();
+        let fill = (area.width as usize).saturating_sub(used + right_w);
+        spans.push(Span::styled(" ".repeat(fill), Style::new().bg(CHROME_BG)));
+        spans.push(Span::styled("  ", Style::new().bg(tui_rgb(color))));
+        spans.push(Span::styled(
+            info,
+            Style::new().fg(CHROME_FG).bg(CHROME_BG).add_modifier(Modifier::BOLD),
+        ));
+
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::new().bg(CHROME_BG)),
+            area,
+        );
+
+        // Transient message / update status overlays the hints area when present.
+        if let Some(ref msg) = self.message {
+            let msg_color = if msg.starts_with('✗') { Color::Red } else { Color::Green };
+            let line = Line::from(Span::styled(
+                format!(" {} ", msg),
+                Style::new().fg(msg_color).bg(CHROME_BG).add_modifier(Modifier::BOLD),
+            ));
+            let row = Rect { x: area.x, y: area.y, width: area.width.min((msg.chars().count() + 2) as u16), height: 1 };
+            frame.render_widget(Paragraph::new(line).style(Style::new().bg(CHROME_BG)), row);
+        }
+    }
+
+    // ── Apply confirmation overlay ───────────────────────────────────────────
+
+    fn render_apply_confirm_overlay(&self, frame: &mut Frame) {
+        let area = centered_rect(frame.area(), 60, 9);
+        frame.render_widget(Clear, area);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" Apply theme ")
+            .title_style(Style::new().fg(CHROME_ACCENT_FG).add_modifier(Modifier::BOLD))
+            .border_style(Style::new().fg(Color::Rgb(90, 85, 115)))
+            .style(Style::new().bg(CHROME_BG));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let name = normalize_theme_name(&self.theme.name);
+        let lines = vec![
+            Line::from(Span::styled(
+                format!(" Run omarchy-theme-set \"{}\"?", name),
+                Style::new().fg(CHROME_FG).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                " This exports the theme and switches your live desktop.",
+                Style::new().fg(CHROME_MUTED),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(" y ", Style::new().fg(CHROME_ACCENT_FG).bg(CHROME_ACCENT_BG).add_modifier(Modifier::BOLD)),
+                Span::styled(" apply now    ", Style::new().fg(CHROME_MUTED)),
+                Span::styled(" n ", Style::new().fg(CHROME_ACCENT_FG).bg(CHROME_ACCENT_BG).add_modifier(Modifier::BOLD)),
+                Span::styled(" cancel", Style::new().fg(CHROME_MUTED)),
+            ]),
+        ];
+        frame.render_widget(Paragraph::new(lines).style(Style::new().bg(CHROME_BG)), inner);
+    }
+
+    // ── Fuzzy field palette ( / ) ────────────────────────────────────────────
+
+    fn render_field_search_overlay(&self, frame: &mut Frame) {
+        let matches = self.filtered_fields();
+        let visible = (matches.len().clamp(1, 12) + 3) as u16;
+        let area = centered_rect(frame.area(), 54, visible);
+        frame.render_widget(Clear, area);
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" Find field ")
+            .title_style(Style::new().fg(CHROME_ACCENT_FG).add_modifier(Modifier::BOLD))
+            .border_style(Style::new().fg(Color::Rgb(90, 85, 115)))
+            .style(Style::new().bg(CHROME_BG));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let [query_row, list_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" › ", Style::new().fg(CHROME_ACCENT_FG).bg(CHROME_BG)),
+                Span::styled(
+                    format!("{}_", self.field_search_query),
+                    Style::new().fg(CHROME_FG).bg(CHROME_BG).add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .style(Style::new().bg(CHROME_BG)),
+            query_row,
+        );
+
+        if matches.is_empty() {
+            frame.render_widget(
+                Paragraph::new(Span::styled("   no match", Style::new().fg(CHROME_MUTED)))
+                    .style(Style::new().bg(CHROME_BG)),
+                list_area,
+            );
+            return;
+        }
+
+        let rows = list_area.height as usize;
+        let sel = self.field_search_index.min(matches.len() - 1);
+        let scroll = if sel >= rows { sel + 1 - rows } else { 0 };
+        for (row, f) in matches.iter().enumerate().skip(scroll).take(rows) {
+            let y = list_area.y + (row - scroll) as u16;
+            let selected = row == sel;
+            let bg = if selected { Color::Rgb(40, 38, 54) } else { CHROME_BG };
+            let line = Line::from(vec![
+                Span::styled(if selected { " ▸ " } else { "   " }, Style::new().fg(CHROME_ACCENT_FG).bg(bg)),
+                Span::styled("● ", Style::new().fg(tui_rgb(f.get(&self.theme.palette))).bg(bg)),
+                Span::styled(format!("{:<13}", f.group().label()), Style::new().fg(CHROME_MUTED).bg(bg)),
+                Span::styled(
+                    f.label().to_string(),
+                    Style::new()
+                        .fg(if selected { CHROME_FG } else { Color::Rgb(192, 192, 214) })
+                        .bg(bg)
+                        .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+                ),
+            ]);
+            frame.render_widget(
+                Paragraph::new(line).style(Style::new().bg(bg)),
+                Rect { x: list_area.x, y, width: list_area.width, height: 1 },
+            );
+        }
+    }
+
+    // ── Color picker overlay (reused, retargeted to PaletteField) ────────────
 
     fn render_color_picker_overlay(&self, frame: &mut Frame) {
         const OB_BG: Color = Color::Rgb(22, 22, 26);
@@ -900,10 +599,7 @@ impl App {
         let hsl = self.color_editor.hsl;
         let hsv = self.color_editor.hsv();
 
-        let original_rgb = self.original_component.as_ref().map(|orig| match self.selected_attribute {
-            PreviewAttribute::Base => orig.base,
-            PreviewAttribute::Background => orig.background,
-        });
+        let original_rgb = self.original_color;
 
         let mk_pill = |key: &str, label: &str, active: bool| -> Vec<Span<'static>> {
             let (key_bg, key_fg, lbl_bg, lbl_fg) = if active {
@@ -934,17 +630,9 @@ impl App {
             } else {
                 vec![]
             },
-            mk_pill(
-                "M",
-                "rgb",
-                self.color_editor.mode == ColorPickerMode::RgbSliders,
-            ),
+            mk_pill("M", "rgb", self.color_editor.mode == ColorPickerMode::RgbSliders),
             vec![Span::raw(" ")],
-            mk_pill(
-                "M",
-                "hsl",
-                self.color_editor.mode == ColorPickerMode::HslField,
-            ),
+            mk_pill("M", "hsl", self.color_editor.mode == ColorPickerMode::HslField),
             if mode_focused {
                 vec![Span::styled(" ‹", Style::new().fg(ACCENT_FG).add_modifier(Modifier::BOLD))]
             } else {
@@ -953,24 +641,21 @@ impl App {
         ]
         .concat();
         let right_pill = {
-            let attr = self.selected_attribute.label();
-            let name = self.selected_element.label();
+            let name = self.selected.label();
             vec![
                 Span::styled("", Style::new().fg(ACCENT_BG).bg(OB_BG)),
                 Span::styled(
-                    format!(" {} ", attr),
+                    format!(" {} ", name),
                     Style::new().fg(ACCENT_FG).bg(ACCENT_BG).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("", Style::new().fg(SUBTLE_BG).bg(ACCENT_BG)),
-                Span::styled(format!(" {} ", name), Style::new().fg(SUBTLE_FG).bg(SUBTLE_BG)),
-                Span::styled("", Style::new().fg(SUBTLE_BG).bg(OB_BG)),
+                Span::styled("", Style::new().fg(ACCENT_BG).bg(OB_BG)),
             ]
         };
         let left_w: usize = header_spans.iter().map(|s| s.width()).sum::<usize>()
             + mode_pills.iter().map(|s| s.width()).sum::<usize>()
             + 1;
         let right_w: usize = right_pill.iter().map(|s| s.width()).sum();
-        let gap = header.width as usize - left_w - right_w;
+        let gap = (header.width as usize).saturating_sub(left_w + right_w);
         header_spans.push(Span::raw(" "));
         header_spans.extend(mode_pills);
         header_spans.push(Span::styled(" ".repeat(gap.max(1)), Style::new().bg(OB_BG)));
@@ -980,14 +665,8 @@ impl App {
             header,
         );
 
-        frame.render_widget(
-            Block::default().style(Style::new().bg(SURFACE_BG)),
-            main_col,
-        );
-        frame.render_widget(
-            Block::default().style(Style::new().bg(OB_BG)),
-            side_col,
-        );
+        frame.render_widget(Block::default().style(Style::new().bg(SURFACE_BG)), main_col);
+        frame.render_widget(Block::default().style(Style::new().bg(OB_BG)), side_col);
 
         match self.color_editor.mode {
             ColorPickerMode::RgbSliders => {
@@ -1084,8 +763,8 @@ impl App {
                     for col in 0..field_area.width {
                         let x_frac = col as f32 / field_area.width.saturating_sub(1).max(1) as f32;
                         let top_frac = (row as f32 * 2.0) / (field_area.height.max(1) as f32 * 2.0 - 1.0);
-                        let bottom_frac = ((row as f32 * 2.0) + 1.0)
-                            / (field_area.height.max(1) as f32 * 2.0 - 1.0);
+                        let bottom_frac =
+                            ((row as f32 * 2.0) + 1.0) / (field_area.height.max(1) as f32 * 2.0 - 1.0);
                         let top = hsv_field_cell(x_frac * 360.0, (1.0 - top_frac) * 100.0, hsv.value);
                         let bottom =
                             hsv_field_cell(x_frac * 360.0, (1.0 - bottom_frac) * 100.0, hsv.value);
@@ -1137,8 +816,8 @@ impl App {
                     .round() as u16;
                 for row in 0..value_area.height {
                     let top_frac = (row as f32 * 2.0) / (value_area.height.max(1) as f32 * 2.0 - 1.0);
-                    let bottom_frac = ((row as f32 * 2.0) + 1.0)
-                        / (value_area.height.max(1) as f32 * 2.0 - 1.0);
+                    let bottom_frac =
+                        ((row as f32 * 2.0) + 1.0) / (value_area.height.max(1) as f32 * 2.0 - 1.0);
                     let top_value = (1.0 - top_frac.clamp(0.0, 1.0)) * 100.0;
                     let bottom_value = (1.0 - bottom_frac.clamp(0.0, 1.0)) * 100.0;
                     let top_color = hsv_field_cell(hsv.hue, hsv.saturation, top_value);
@@ -1223,24 +902,12 @@ impl App {
                 rect,
             );
         };
-        field_block(
-            rects.hex_field,
-            "HEX",
-            self.color_editor.focus == ColorPickerFocus::HexField,
-        );
+        field_block(rects.hex_field, "HEX", self.color_editor.focus == ColorPickerFocus::HexField);
         for (idx, rect) in rects.rgb_fields.iter().enumerate() {
-            field_block(
-                *rect,
-                ["R", "G", "B"][idx],
-                self.color_editor.focus == ColorPickerFocus::RgbField(idx),
-            );
+            field_block(*rect, ["R", "G", "B"][idx], self.color_editor.focus == ColorPickerFocus::RgbField(idx));
         }
         for (idx, rect) in rects.hsl_fields.iter().enumerate() {
-            field_block(
-                *rect,
-                ["H", "S", "L"][idx],
-                self.color_editor.focus == ColorPickerFocus::HslFieldValue(idx),
-            );
+            field_block(*rect, ["H", "S", "L"][idx], self.color_editor.focus == ColorPickerFocus::HslFieldValue(idx));
         }
         let render_field_value = |frame: &mut Frame, rect: Rect, value: String, suffix: &str, editing: bool| {
             let inner = Rect {
@@ -1302,8 +969,6 @@ impl App {
                 Span::styled(" focus  ", Style::new().fg(OB_MUTED)),
                 Span::styled(" M ", Style::new().fg(ACCENT_FG).bg(ACCENT_BG).add_modifier(Modifier::BOLD)),
                 Span::styled(" switch  ", Style::new().fg(OB_MUTED)),
-                Span::styled(" F ", Style::new().fg(ACCENT_FG).bg(ACCENT_BG).add_modifier(Modifier::BOLD)),
-                Span::styled(" fg/bg  ", Style::new().fg(OB_MUTED)),
                 Span::styled(" Enter ", Style::new().fg(ACCENT_FG).bg(ACCENT_BG).add_modifier(Modifier::BOLD)),
                 Span::styled(" edit/keep", Style::new().fg(OB_MUTED)),
             ]),
@@ -1330,11 +995,11 @@ impl App {
         let normalized = if preview_name.is_empty() {
             String::from("<invalid>")
         } else {
-            format!("{}.kdl", preview_name)
+            format!("~/.config/omarchy/themes/{}/", preview_name)
         };
 
         let lines = vec![
-            Line::from(" Save theme as "),
+            Line::from(" Export theme as "),
             Line::from(""),
             Line::from(vec![
                 Span::styled(" Name: ", Style::new().fg(Color::Rgb(167, 139, 250))),
@@ -1344,7 +1009,7 @@ impl App {
                 ),
             ]),
             Line::from(vec![
-                Span::styled(" File: ", Style::new().fg(Color::DarkGray)),
+                Span::styled(" Dir:  ", Style::new().fg(Color::DarkGray)),
                 Span::styled(normalized, Style::new().fg(Color::Gray)),
             ]),
             Line::from(""),
@@ -1353,7 +1018,7 @@ impl App {
                 Style::new().fg(Color::DarkGray),
             )),
             Line::from(Span::styled(
-                " Enter: save  Esc: cancel  Backspace: delete",
+                " Enter: export  Esc: cancel  Backspace: delete",
                 Style::new().fg(Color::DarkGray),
             )),
         ];
@@ -1366,9 +1031,7 @@ impl App {
             .style(Style::new().bg(Color::Rgb(22, 22, 26)));
 
         frame.render_widget(
-            Paragraph::new(lines)
-                .block(block)
-                .style(Style::new().bg(Color::Rgb(22, 22, 26))),
+            Paragraph::new(lines).block(block).style(Style::new().bg(Color::Rgb(22, 22, 26))),
             area,
         );
     }
@@ -1391,28 +1054,29 @@ impl App {
         }
 
         let rows: &[HelpRow<'_>] = &[
-            HelpRow::Section("Preview"),
-            HelpRow::Entry("↑/j  ↓/k  ← →", "Navigate preview elements"),
-            HelpRow::Entry("Tab", "Toggle FG / BG (pane borders: FG only)"),
-            HelpRow::Entry("c", "Open color picker for selected color"),
+            HelpRow::Section("Editor"),
+            HelpRow::Entry("1–6", "Jump to a palette group"),
+            HelpRow::Entry("← → / Tab", "Previous / next group"),
+            HelpRow::Entry("↑/k ↓/j", "Field within the current group"),
+            HelpRow::Entry("/", "Find a field (fuzzy search)"),
+            HelpRow::Entry("c / Enter", "Open color picker for selected field"),
             HelpRow::Entry("y", "Yank (copy) current color"),
             HelpRow::Entry("p", "Paste yanked color"),
             HelpRow::Entry("u", "Undo last color change"),
-            HelpRow::Entry("s", "Save theme as… (prompts for name)"),
+            HelpRow::Entry("s", "Export theme to ~/.config/omarchy/themes"),
             HelpRow::Entry("l", "Open theme loader"),
-            HelpRow::Entry("a", "Apply current theme to Zellij config"),
-            HelpRow::Entry("U", "Install latest released binary on Linux x86_64 when available"),
+            HelpRow::Entry("a", "Apply via omarchy-theme-set (confirmed)"),
+            HelpRow::Entry("U", "Install latest release when available"),
             HelpRow::Entry("?", "Toggle this help screen"),
             HelpRow::Entry("q / Esc", "Quit"),
             HelpRow::Spacer,
             HelpRow::Section("Color Picker"),
             HelpRow::Entry("Tab / Shift+Tab", "Move focus between controls"),
             HelpRow::Entry("m", "Switch RGB sliders / HSL field"),
-            HelpRow::Entry("f", "Toggle FG / BG (non-pane)"),
-            HelpRow::Entry("Mouse drag", "Drag in HSL field or lightness slider"),
+            HelpRow::Entry("Mouse drag", "Drag in HSL field or value slider"),
             HelpRow::Entry("← → ↑ ↓", "Nudge the focused control"),
             HelpRow::Entry("Shift / Alt", "Coarse / fine nudging"),
-            HelpRow::Entry("Enter", "Edit the focused value field or confirm"),
+            HelpRow::Entry("Enter", "Edit the focused value field or keep"),
             HelpRow::Entry("#", "Jump to hex field editing"),
             HelpRow::Entry("Esc", "Cancel"),
             HelpRow::Spacer,
@@ -1421,7 +1085,6 @@ impl App {
             HelpRow::Entry("Enter / ↓", "Commit search and move into results"),
             HelpRow::Entry("↑ ↓", "Navigate themes"),
             HelpRow::Entry("Enter", "Load selected theme into editor"),
-            HelpRow::Entry("a", "Apply selected theme to Zellij"),
             HelpRow::Entry("d", "Filter built-in themes"),
             HelpRow::Entry("s", "Filter saved themes"),
             HelpRow::Entry("r", "Rename selected saved theme"),
@@ -1449,7 +1112,7 @@ impl App {
         .areas(inner);
 
         let title = vec![Span::styled(
-            " Help ",
+            " omarchy-theme-studio · Help ",
             Style::new().fg(PANEL_TEXT).add_modifier(Modifier::BOLD),
         )];
         let scroll_label = format!("{:>2} rows", rows.len());
@@ -1462,12 +1125,7 @@ impl App {
         header_spans.extend(right_spans);
         frame.render_widget(
             Paragraph::new(Line::from(header_spans)).style(Style::new().bg(PANEL_BG)),
-            Rect {
-                x: header_rect.x,
-                y: header_rect.y,
-                width: header_rect.width,
-                height: 1,
-            },
+            Rect { x: header_rect.x, y: header_rect.y, width: header_rect.width, height: 1 },
         );
 
         let header_hint = vec![
@@ -1478,12 +1136,7 @@ impl App {
         ];
         frame.render_widget(
             Paragraph::new(Line::from(header_hint)).style(Style::new().bg(PANEL_BG)),
-            Rect {
-                x: header_rect.x,
-                y: header_rect.y + 1,
-                width: header_rect.width,
-                height: 1,
-            },
+            Rect { x: header_rect.x, y: header_rect.y + 1, width: header_rect.width, height: 1 },
         );
 
         let [list_rect, detail_rect] =
@@ -1535,43 +1188,23 @@ impl App {
             .collect();
 
         frame.render_widget(
-            Paragraph::new(list_lines)
-                .scroll((scroll, 0))
-                .style(Style::new().bg(PANEL_BG)),
+            Paragraph::new(list_lines).scroll((scroll, 0)).style(Style::new().bg(PANEL_BG)),
             list_inner,
         );
 
         let detail_lines = vec![
+            Line::from(Span::styled(" Exports", Style::new().fg(PANEL_MUTED).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled(
-                " Navigation",
-                Style::new().fg(PANEL_MUTED).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                " Use cursor keys or j/k to scroll this help view.",
-                Style::new().fg(PANEL_TEXT),
-            )),
-            Line::from(Span::styled(
-                " Press uppercase U in preview mode to update when the status bar says one is available.",
-                Style::new().fg(PANEL_MUTED),
-            )),
-            Line::from(Span::styled(
-                " PgUp/PgDn moves faster. Home/End jumps to top or bottom.",
-                Style::new().fg(PANEL_MUTED),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                " Overlay Style",
-                Style::new().fg(PANEL_MUTED).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                " This panel now uses the same rounded frame, accent pills, and split layout as the picker and loader.",
+                " Saving writes a real Omarchy theme dir: colors.toml, hyprland.conf, waybar.css, walker.css, ghostty.conf, README.md.",
                 Style::new().fg(PANEL_TEXT),
             )),
             Line::from(""),
+            Line::from(Span::styled(" Apply", Style::new().fg(PANEL_MUTED).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled(
-                " Scroll",
-                Style::new().fg(PANEL_MUTED).add_modifier(Modifier::BOLD),
+                " 'a' runs omarchy-theme-set only after you confirm. Nothing is applied automatically.",
+                Style::new().fg(PANEL_TEXT),
             )),
+            Line::from(""),
             Line::from(Span::styled(
                 format!(" Showing from row {} of {}", scroll.saturating_add(1), rows.len()),
                 Style::new().fg(if max_scroll > 0 { ACCENT_FG } else { PANEL_TEXT }),
@@ -1630,23 +1263,14 @@ impl App {
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled(
-                    " Enter ",
-                    Style::new().fg(ACCENT_FG).bg(ACCENT_BG).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(" Enter ", Style::new().fg(ACCENT_FG).bg(ACCENT_BG).add_modifier(Modifier::BOLD)),
                 Span::styled(" restart now  ", Style::new().fg(PANEL_MUTED)),
-                Span::styled(
-                    " L ",
-                    Style::new().fg(SUBTLE_FG).bg(SUBTLE_BG).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(" L ", Style::new().fg(SUBTLE_FG).bg(SUBTLE_BG).add_modifier(Modifier::BOLD)),
                 Span::styled(" later", Style::new().fg(PANEL_MUTED)),
             ]),
         ];
 
-        frame.render_widget(
-            Paragraph::new(lines).style(Style::new().bg(PANEL_BG)),
-            inner,
-        );
+        frame.render_widget(Paragraph::new(lines).style(Style::new().bg(PANEL_BG)), inner);
     }
 
     fn render_theme_load_overlay(&self, frame: &mut Frame) {
@@ -1658,9 +1282,7 @@ impl App {
             .max()
             .unwrap_or(24) as u16;
         let desired_w = longest_name.saturating_add(18);
-        let overlay_w = desired_w
-            .clamp(64, 78)
-            .min(frame.area().width.saturating_sub(4));
+        let overlay_w = desired_w.clamp(64, 78).min(frame.area().width.saturating_sub(4));
         let area = centered_rect(frame.area(), overlay_w, overlay_h);
         frame.render_widget(Clear, area);
 
@@ -1732,10 +1354,7 @@ impl App {
                     Style::new().fg(key_fg).bg(key_bg).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("", Style::new().fg(lbl_bg).bg(key_bg)),
-                Span::styled(
-                    format!(" {} ", label),
-                    Style::new().fg(lbl_fg).bg(lbl_bg),
-                ),
+                Span::styled(format!(" {} ", label), Style::new().fg(lbl_fg).bg(lbl_bg)),
                 Span::styled("", Style::new().fg(lbl_bg).bg(PANEL_BG)),
                 Span::raw(" "),
             ]
@@ -1757,7 +1376,6 @@ impl App {
             height: inner.height.saturating_sub(4),
         };
         let list_inner = body_rect;
-
         let cards_per_view = list_inner.height.saturating_sub(1) as usize;
 
         let scroll = if self.loadable_themes.len() <= cards_per_view {
@@ -1774,10 +1392,7 @@ impl App {
                 Paragraph::new(vec![
                     Line::from(Span::styled(" No themes match ", Style::new().fg(PANEL_TEXT).add_modifier(Modifier::BOLD))),
                     Line::from(""),
-                    Line::from(Span::styled(
-                        format!(" \"/{}\"", display_query),
-                        Style::new().fg(PANEL_MUTED),
-                    )),
+                    Line::from(Span::styled(format!(" \"/{}\"", display_query), Style::new().fg(PANEL_MUTED))),
                 ])
                 .style(Style::new().bg(PANEL_BG)),
                 list_inner,
@@ -1788,12 +1403,7 @@ impl App {
                 if row_y >= list_inner.y + list_inner.height {
                     break;
                 }
-                let row_rect = Rect {
-                    x: list_inner.x,
-                    y: row_y,
-                    width: list_inner.width,
-                    height: 1,
-                };
+                let row_rect = Rect { x: list_inner.x, y: row_y, width: list_inner.width, height: 1 };
                 self.render_theme_card(frame, row_rect, i, i == self.selected_theme_index, &active_name);
             }
         }
@@ -1829,34 +1439,23 @@ impl App {
         active_name: &Option<String>,
     ) {
         let entry = &self.loadable_themes[index];
-        let swatches = self.theme_swatches.get(entry.name()).copied()
-            .unwrap_or([crate::theme::RgbColor::new(50, 50, 50); 4]);
+        let swatches = self
+            .theme_swatches
+            .get(entry.name())
+            .copied()
+            .unwrap_or([RgbColor::new(50, 50, 50); 4]);
         let is_active = active_name.as_deref() == Some(entry.name());
-        let row_bg = if selected {
-            Color::Rgb(30, 30, 38)
-        } else {
-            Color::Rgb(22, 22, 26)
-        };
-        let row_fg = if selected {
-            Color::White
-        } else {
-            Color::Rgb(192, 192, 214)
-        };
-        let type_fg = if selected {
-            Color::Rgb(176, 176, 202)
-        } else {
-            Color::Rgb(108, 108, 132)
-        };
+        let row_bg = if selected { Color::Rgb(30, 30, 38) } else { Color::Rgb(22, 22, 26) };
+        let row_fg = if selected { Color::White } else { Color::Rgb(192, 192, 214) };
+        let type_fg = if selected { Color::Rgb(176, 176, 202) } else { Color::Rgb(108, 108, 132) };
 
-        let mut spans = vec![
-            Span::styled(
-                if selected { "> " } else { "  " },
-                Style::new()
-                    .fg(if selected { Color::Rgb(200, 190, 240) } else { Color::Rgb(72, 72, 92) })
-                    .bg(row_bg)
-                    .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
-            ),
-        ];
+        let mut spans = vec![Span::styled(
+            if selected { "> " } else { "  " },
+            Style::new()
+                .fg(if selected { Color::Rgb(200, 190, 240) } else { Color::Rgb(72, 72, 92) })
+                .bg(row_bg)
+                .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+        )];
 
         let type_label = if entry.is_builtin() { "B" } else { "S" };
         let detail_w = if selected { 12 } else { 4 };
@@ -1870,20 +1469,11 @@ impl App {
         spans.push(Span::styled(" ", Style::new().bg(row_bg)));
         if selected {
             for sw in swatches.iter().take(3) {
-                spans.push(Span::styled(
-                    "● ",
-                    Style::new().fg(Color::Rgb(sw.r, sw.g, sw.b)).bg(row_bg),
-                ));
+                spans.push(Span::styled("● ", Style::new().fg(Color::Rgb(sw.r, sw.g, sw.b)).bg(row_bg)));
             }
-            spans.push(Span::styled(
-                type_label,
-                Style::new().fg(type_fg).bg(row_bg).add_modifier(Modifier::BOLD),
-            ));
+            spans.push(Span::styled(type_label, Style::new().fg(type_fg).bg(row_bg).add_modifier(Modifier::BOLD)));
         } else if is_active {
-            spans.push(Span::styled(
-                "● ",
-                Style::new().fg(Color::Rgb(110, 220, 110)).bg(row_bg),
-            ));
+            spans.push(Span::styled("● ", Style::new().fg(Color::Rgb(110, 220, 110)).bg(row_bg)));
             spans.push(Span::styled(type_label, Style::new().fg(type_fg).bg(row_bg)));
         } else {
             spans.push(Span::styled("  ", Style::new().bg(row_bg)));
@@ -1894,5 +1484,106 @@ impl App {
             Paragraph::new(Line::from(spans)).style(Style::new().bg(row_bg)),
             area,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
+
+    fn find_text(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        let width = buffer.area.width;
+        let height = buffer.area.height;
+        let chars: Vec<char> = needle.chars().collect();
+        let needle_width = chars.len() as u16;
+        for y in 0..height {
+            for x in 0..width.saturating_sub(needle_width).saturating_add(1) {
+                let matched = chars
+                    .iter()
+                    .enumerate()
+                    .all(|(offset, ch)| buffer[(x + offset as u16, y)].symbol().starts_with(*ch));
+                if matched {
+                    return Some((x, y));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn preview_renders_desktop_regions() {
+        let app = App::default();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
+        let buffer = &frame.buffer;
+        assert!(find_text(buffer, "Active window").is_some());
+        assert!(find_text(buffer, "Launcher").is_some());
+        assert!(find_text(buffer, "Terminal").is_some());
+        assert!(find_text(buffer, "Notification").is_some());
+    }
+
+    #[test]
+    fn terminal_panel_uses_palette_background() {
+        let mut app = App::default();
+        app.theme.palette.terminal_background = RgbColor::new(7, 9, 11);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
+        let buffer = &frame.buffer;
+        let pos = find_text(buffer, "applied").expect("terminal sample should render");
+        assert_eq!(buffer[pos].bg, Color::Rgb(7, 9, 11));
+    }
+
+    #[test]
+    fn group_tabs_show_all_six_groups() {
+        let app = App::default();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
+        let buffer = &frame.buffer;
+        for label in ["Desktop", "Windows", "Waybar", "Launcher", "Terminal", "Notification"] {
+            assert!(find_text(buffer, label).is_some(), "group tab '{label}' should render");
+        }
+    }
+
+    #[test]
+    fn field_selector_shows_active_group_fields() {
+        // Desktop group is selected by default; its leaf labels appear up top.
+        let app = App::default();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
+        assert!(find_text(&frame.buffer, "Accent 2").is_some(), "selector should list group fields");
+    }
+
+    #[test]
+    fn field_search_overlay_lists_matches() {
+        let mut app = App::default();
+        app.open_field_search();
+        for c in "laun".chars() {
+            app.push_field_search_char(c);
+        }
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+        let frame = terminal.draw(|f| app.render(f)).expect("draw should succeed");
+        assert!(find_text(&frame.buffer, "Find field").is_some());
+        assert!(find_text(&frame.buffer, "Launcher background").is_some());
+    }
+
+    #[test]
+    fn every_input_mode_renders_without_panic() {
+        let modes = [
+            InputMode::Preview,
+            InputMode::ColorPicker,
+            InputMode::ThemeNameInput,
+            InputMode::ApplyConfirm,
+            InputMode::FieldSearch,
+            InputMode::ThemeLoad,
+            InputMode::Help,
+        ];
+        for mode in modes {
+            let mut app = App::default();
+            app.refresh_theme_list();
+            app.input_mode = mode;
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("test terminal");
+            terminal.draw(|f| app.render(f)).expect("draw should succeed");
+        }
     }
 }

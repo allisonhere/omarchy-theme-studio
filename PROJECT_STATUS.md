@@ -1,6 +1,6 @@
 # omarchy-theme-studio
 
-A terminal UI application for configuring Zellij tab bar themes.
+A terminal UI for designing Omarchy desktop themes (Rust, `ratatui` + `crossterm`).
 
 ## Project Location
 
@@ -8,82 +8,25 @@ A terminal UI application for configuring Zellij tab bar themes.
 /home/allie/Projects/omarchy-theme-studio/
 ```
 
-## Files
+## Architecture
 
-- `src/main.rs` - Entry point
-- `src/theme/mod.rs` - Theme data structures (RgbColor, ThemeComponent, Theme, ThemeComponentType)
-- `src/config/mod.rs` - ConfigManager for KDL file parsing/saving
-- `src/ui/mod.rs` - Main UI logic (preview, color picker)
+- `src/theme/mod.rs` — `RgbColor`, the flat `ThemePalette` (17 colors), the `Theme { name, palette }`
+  wrapper, and the `PaletteField` editing-target enum.
+- `src/theme/presets.rs` — built-in starter palettes (tokyo-night, nord, gruvbox, rose-pine).
+- `src/config/mod.rs` — `ConfigManager`: exports a theme directory under
+  `~/.config/omarchy/themes/<name>/` (colors.toml, hyprland.conf, waybar.css, walker.css,
+  ghostty.conf, README.md, palette.json), lists/loads/renames/deletes, and the gated apply via
+  `omarchy-theme-set`.
+- `src/ui/state.rs` — `App` state machine, palette-field selection, undo/yank/paste, loader, save/apply flows.
+- `src/ui/render.rs` — mock Hyprland desktop preview + color-picker / loader / help / confirm overlays.
+- `src/ui/events.rs` — key/mouse handling and the terminal event loop.
+- `src/ui/color_picker.rs` — reusable RGB/HSL/HEX color editor.
+- `src/update.rs` — in-app self-update from GitHub releases.
 
-## Dependencies
+## Status
 
-```toml
-ratatui = { version = "0.30", features = ["all-widgets"] }
-crossterm = "0.29"
-kdl = "4"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-dirs = "5"
-thiserror = "2"
-```
-
-## Features
-
-### Navigation
-- **Arrow keys** - Navigate between UI elements in the preview
-- **Tab** - Toggle between foreground/background color editing
-- **c** - Open RGB color picker
-- **Enter** - Apply color changes
-- **Esc** - Cancel/close picker
-- **s** - Open save-as prompt for a named theme
-- **l** - Load an existing saved theme
-- **q** - Quit
-
-### Color Picker (pik-style)
-- **Up/Down** - Select RGB channel to edit
-- **Left/Right** - Adjust selected channel value (by 5)
-- **Tab** - Switch between fg/bg (remembers state)
-- Visual sliders with `█` and `░` characters
-
-### Editable Elements
-
-| Element | Description |
-|---------|-------------|
-| Tab (Selected) | Selected tab in tab bar |
-| Tab (Unselected) | Unselected tabs in tab bar |
-| Status Bar | Status bar including "Locked" indicator |
-| Pane (Selected) | Selected pane frame |
-| Pane (Highlight) | Highlighted pane frame |
-| Pane (Unselected) | Unselected pane frame |
-| List Item (Selected) | Selected list item |
-| List Item (Unselected) | Unselected list item |
-| Exit Code (Success) | Success exit code display |
-| Exit Code (Error) | Error exit code display |
-
-## Theme Components
-
-Each element has:
-- **Foreground (base)** - Primary text color
-- **Background** - Background color
-
-Zellij theme format supports additional emphasis levels (0-3) but these are not currently editable in this UI.
-
-## Color Preview
-
-When editing, the preview panel shows:
-- Current element name and selected attribute
-- Hex color value
-- Yellow `◄` indicator on selected element
-
-## Color Picker Preview
-
-Shows styled text samples with:
-- Tab name
-- Status text
-- List item
-- Exit code
-
-Uses the other attribute's color as context (e.g., editing FG shows new color on current BG).
+- v1 complete: edit palette, live mock-desktop preview, export Omarchy-native theme dir, gated apply.
+- Non-destructive: only writes inside the theme's own directory; never auto-applies.
 
 ## Running
 
@@ -92,35 +35,10 @@ cd /home/allie/Projects/omarchy-theme-studio
 cargo run
 ```
 
-Themes are saved to `~/.config/zellij/themes/` as named `.kdl` files.
+Saved themes land in `~/.config/omarchy/themes/<name>/`.
 
-## KDL Format
+## Out of scope for v1
 
-```kdl
-themes {
-    theme_name {
-        ribbon_selected {
-            base 255 255 255
-            background 80 80 80
-            emphasis_0 255 255 255
-            emphasis_1 200 200 200
-            emphasis_2 150 150 150
-            emphasis_3 100 100 100
-        }
-        // ... more components
-    }
-}
-```
-
-## TODO / Known Issues
-
-- [ ] KDL parsing functions exist but not fully wired up for loading existing themes
-- [ ] Could add more color adjustment (shift+arrow for finer control)
-- [ ] Could add theme reset functionality
-- [ ] Unused code warnings for `ColorAttribute`, some config methods
-
-## Inspiration
-
-- Color picker UI inspired by [pik](https://github.com/immanelg/pik)
-- pik uses horizontal sliders with visual progress bars
-- Keyboard-driven navigation similar to vim-style editors
+- Generating every Omarchy app file (btop/neovim/vscode/mako/gtk/etc.) — `colors.toml` plus
+  Omarchy's template engine covers the wider ecosystem.
+- Background images, `light.mode` detection, and a `preview.png` generator.
