@@ -1,0 +1,20 @@
+[package]
+name = "omarchy_theme_studio"
+version = "0.5.0"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+ratatui = { version = "0.30", features = ["all-widgets"] }
+crossterm = "0.29"
+kdl = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+thiserror = "2"
+ureq = { version = "2", features = ["json"] }
+palette = { version = "0.7", default-features = false, features = ["std"] }
+
+[[bin]]
+name = "omarchy-theme-studio"
+path = "src/main.rs"
